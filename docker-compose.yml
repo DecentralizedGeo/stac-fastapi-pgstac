@@ -1,17 +1,18 @@
 services:
   app:
-    image: stac-utils/stac-fastapi-pgstac
-    build: .
+    image: ghcr.io/stac-utils/stac-fastapi-pgstac:4.0.0
+    container_name: stac-fastapi-pgstac
     environment:
       - APP_HOST=0.0.0.0
-      - APP_PORT=8082
+      - APP_PORT=${PGSTAC_PORT}
       - RELOAD=true
       - ENVIRONMENT=local
-      - PGUSER=username
-      - PGPASSWORD=password
-      - PGDATABASE=postgis
-      - PGHOST=database
-      - PGPORT=5432
+      - postgres_user=${POSTGRES_USER}
+      - postgres_pass=${POSTGRES_PASSWORD}
+      - postgres_host_reader=database
+      - postgres_host_writer=database
+      - postgres_port=${DB_PORT}
+      - postgres_dbname=${DB_NAME}
       - WEB_CONCURRENCY=10
       - VSI_CACHE=TRUE
       - GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES
@@ -21,78 +22,48 @@ services:
       - USE_API_HYDRATE=${USE_API_HYDRATE:-false}
       - ENABLE_TRANSACTIONS_EXTENSIONS=TRUE
     ports:
-      - "8082:8082"
+      - ${PGSTAC_PORT}:${PGSTAC_PORT}
     depends_on:
       - database
-    command: bash -c "scripts/wait-for-it.sh database:5432 && python -m stac_fastapi.pgstac.app"
+    command: bash -c "chmod +x /app/scripts/wait-for-it.sh && /app/scripts/wait-for-it.sh database:${DB_PORT} && python -m stac_fastapi.pgstac.app"
     develop:
       watch:
         - action: rebuild
           path: ./stac_fastapi/pgstac
 
-  tests:
-    image: stac-utils/stac-fastapi-pgstac-test
-    build:
-      context: .
-      dockerfile: Dockerfile.tests
-    environment:
-      - ENVIRONMENT=local
-      - DB_MIN_CONN_SIZE=1
-      - DB_MAX_CONN_SIZE=1
-      - USE_API_HYDRATE=${USE_API_HYDRATE:-false}
-    command: bash -c "python -m pytest -s -vv"
-
   database:
-    image: ghcr.io/stac-utils/pgstac:v0.9.8
+    container_name: stac-db
+    image: ghcr.io/stac-utils/pgstac:v0.9.9
     environment:
-      - POSTGRES_USER=username
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=postgis
-      - PGUSER=username
-      - PGPASSWORD=password
-      - PGDATABASE=postgis
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+      - PGUSER=${POSTGRES_USER}
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+      - PGDATABASE=${DB_NAME}
     ports:
-      - "5439:5432"
+      - 5439:${DB_PORT}
     command: postgres -N 500
 
-  # Load joplin demo dataset into the PGStac Application
-  loadjoplin:
-    image: stac-utils/stac-fastapi-pgstac
+  # Watch and auto-ingest collections when they change (Smart hash-based detection)
+  watcher:
+    container_name: collection-watcher
+    image: ghcr.io/stac-utils/stac-fastapi-pgstac:4.0.0
     environment:
-      - ENVIRONMENT=development
+      - ENVIRONMENT=local
     volumes:
-      - ./testdata:/tmp/testdata      
-      - ./scripts:/tmp/scripts
+      - ${ROOT_DIR}/scripts:/app/scripts
+      - ${METADATA_WAREHOUSE}:/data-warehouse
+      - ${ROOT_DIR}/state:/app/state
     command: >
       /bin/sh -c "
-        scripts/wait-for-it.sh -t 60 app:8082 &&
+        scripts/wait-for-it.sh -t 60 app:${PGSTAC_PORT} &&
         python -m pip install pip -U &&
         python -m pip install requests &&
-        python /tmp/scripts/ingest_joplin.py http://app:8082
+        echo 'Starting watcher service...' &&
+        python /app/scripts/watch_and_ingest.py http://app:${PGSTAC_PORT} 300 /app/state/collection_hashes.json || (echo 'Watcher failed'; exit 1)
         "
     depends_on:
       - database
       - app
-
-  nginx:
-    image: nginx
-    ports:
-      - ${STAC_FASTAPI_NGINX_PORT:-8080}:80
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-    depends_on:
-      - app-nginx
-    command: [ "nginx-debug", "-g", "daemon off;" ]
-
-  app-nginx:
-    extends:
-      service: app
-    command: >
-      bash -c "
-      scripts/wait-for-it.sh database:5432 && 
-      uvicorn stac_fastapi.pgstac.app:app --host 0.0.0.0 --port 8082 --proxy-headers --forwarded-allow-ips=* --root-path=/api/v1/pgstac
-      "
-
-networks:
-  default:
-    name: stac-fastapi-network
+    restart: unless-stopped

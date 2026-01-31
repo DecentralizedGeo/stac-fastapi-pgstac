@@ -129,3 +129,6 @@ venv
 
 # IDE
 .vscode
+
+# Project Specific
+state/
