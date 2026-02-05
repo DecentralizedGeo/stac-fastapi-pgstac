@@ -67,3 +67,32 @@ services:
       - database
       - app
     restart: unless-stopped
+
+  # One-time initialization: Load queryables after database is ready
+  queryables-init:
+    container_name: queryables-loader
+    image: python:3.10-slim
+    environment:
+      - PGHOST=database
+      - PGPORT=${DB_PORT}
+      - PGUSER=${POSTGRES_USER}
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+      - PGDATABASE=${DB_NAME}
+    volumes:
+      - ${ROOT_DIR}/scripts:/app/scripts
+      - ${METADATA_WAREHOUSE}:/data-warehouse
+    command: >
+      /bin/sh -c "
+        /app/scripts/wait-for-it.sh database:${DB_PORT} &&
+        sleep 5 &&
+        pip install pypgstac[psycopg] -q &&
+        echo 'Loading queryables...' &&
+        pypgstac load_queryables /data-warehouse/dgeo_queryables.json &&
+        echo 'Queryables loaded successfully.'
+        "
+    # restart: unless-stopped
+    depends_on:
+      - database
+    # Uncomment the following lines to enable the profile for one-time initialization  
+    # profiles:
+    #   - init
