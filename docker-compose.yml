@@ -53,6 +53,11 @@ services:
     image: ghcr.io/stac-utils/stac-fastapi-pgstac:4.0.0
     environment:
       - ENVIRONMENT=local
+      - PGHOST=database
+      - PGPORT=${DB_PORT}
+      - PGUSER=${POSTGRES_USER}
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+      - PGDATABASE=${DB_NAME}
     volumes:
       - ${ROOT_DIR}/scripts:/app/scripts
       - ${METADATA_WAREHOUSE}:/data-warehouse
@@ -62,6 +67,7 @@ services:
         scripts/wait-for-it.sh -t 60 app:${PGSTAC_PORT} &&
         python -m pip install pip -U &&
         python -m pip install requests &&
+        python -m pip install pypgstac[psycopg] -q &&
         echo 'Starting watcher service...' &&
         python /app/scripts/watch_and_ingest.py http://app:${PGSTAC_PORT} 300 /app/state/collection_hashes.json || (echo 'Watcher failed'; exit 1)
         "

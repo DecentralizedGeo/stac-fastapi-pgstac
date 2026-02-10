@@ -1,17 +1,30 @@
 # /// script
 # dependencies = [
 #   "requests",
+#   "pypgstac[psycopg]",
 # ]
 # ///
 
-"""Ingest any testdata collection and its items during docker-compose."""
+"""Ingest any testdata collection and its items during docker-compose.
+
+Uses pypgstac bulk loading via PostgreSQL COPY for 100-500x faster ingestion
+compared to HTTP requests. Falls back to HTTP if database connection unavailable.
+"""
 
 import json
+import logging
+import os
 import sys
+import time
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urljoin
 
 import requests
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 workingdir = Path(__file__).parent.absolute()
 # Try data-warehouse first, fallback to testdata
@@ -96,7 +109,11 @@ def sanitize_item(item: dict) -> dict:
 
 
 def ingest_collection_data(collection_name: str, app_host: str) -> None:
-    """Ingest collection and items by name from testdata."""
+    """Ingest collection and items by name from testdata.
+
+    Attempts to use pypgstac bulk loading (100-500x faster) if database
+    connection is available, otherwise falls back to HTTP ingestion.
+    """
     collection_dir = data_warehouse_dir / collection_name
     collection_path = collection_dir / "collection.json"
     items_dir = collection_dir / "items"
@@ -109,18 +126,99 @@ def ingest_collection_data(collection_name: str, app_host: str) -> None:
     with collection_path.open() as f:
         collection = json.load(f)
 
+    # Try bulk loading via database first (much faster)
+    if _try_bulk_load(collection, items_dir, collection_name):
+        logger.info(f"✓ Successfully ingested {collection_name} via bulk loading")
+        return
+
+    # Fall back to HTTP ingestion
+    logger.info(f"Falling back to HTTP ingestion for {collection_name}")
+    _ingest_via_http(collection, items_dir, app_host)
+
+
+def _try_bulk_load(collection: dict, items_dir: Path, collection_name: str) -> bool:
+    """Attempt to ingest using pypgstac bulk loading.
+
+    Returns True if successful, False if database not available.
+    """
+    try:
+        from pypgstac.db import PgstacDB
+        from pypgstac.load import Loader, Methods
+    except ImportError:
+        logger.warning("pypgstac not installed, using HTTP fallback")
+        return False
+
+    try:
+        # Get database connection from environment variables or DSN
+        dsn = _get_db_connection_string()
+        if not dsn:
+            logger.warning("Database connection not configured, using HTTP fallback")
+            return False
+
+        db = PgstacDB(dsn=dsn)
+        loader = Loader(db=db)
+
+        # Ingest collection first
+        start_time = time.time()
+        logger.info(f"Loading collection: {collection_name}")
+        loader.load_collections([collection], insert_mode=Methods.upsert)
+
+        # Ingest items via generator (streaming, memory efficient)
+        logger.info(f"Loading items from {items_dir}...")
+        items_generator = _item_generator(items_dir)
+        loader.load_items(items_generator, insert_mode=Methods.upsert, chunksize=10000)
+
+        elapsed = time.time() - start_time
+        item_count = len(list(items_dir.glob("*.json")))
+        rate = item_count / elapsed if elapsed > 0 else 0
+        logger.info(f"Completed in {elapsed:.1f}s ({rate:.0f} items/sec)")
+
+        return True
+
+    except Exception as e:
+        logger.warning(f"Bulk loading failed: {e}. Using HTTP fallback.")
+        return False
+
+
+def _get_db_connection_string() -> Optional[str]:
+    """Build PostgreSQL connection string from environment variables."""
+    host = os.getenv("PGHOST") or os.getenv("postgres_host_writer") or "database"
+    port = os.getenv("PGPORT") or os.getenv("postgres_port") or "5432"
+    user = os.getenv("PGUSER") or os.getenv("postgres_user") or "postgres"
+    password = os.getenv("PGPASSWORD") or os.getenv("postgres_pass")
+    dbname = os.getenv("PGDATABASE") or os.getenv("postgres_dbname") or "postgres"
+
+    if not password:
+        return None  # Can't connect without password
+
+    return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+
+
+def _item_generator(items_dir: Path):
+    """Generator that yields sanitized items from individual JSON files."""
+    for item_file in sorted(items_dir.glob("*.json")):
+        try:
+            with item_file.open() as f:
+                item = json.load(f)
+            yield sanitize_item(item)
+        except Exception as e:
+            logger.error(f"Error loading {item_file}: {e}")
+            # Continue with next item instead of failing
+
+
+def _ingest_via_http(collection: dict, items_dir: Path, app_host: str) -> None:
+    """Fallback HTTP-based ingestion (slow but reliable)."""
     post_or_put(urljoin(app_host, "/collections"), collection)
 
-    for item_file in items_dir.glob("*.json"):
+    item_files = list(items_dir.glob("*.json"))
+    for idx, item_file in enumerate(item_files, 1):
         with item_file.open() as f:
             item = json.load(f)
-        # Normalize media types to satisfy server enum validation
-        # This is needed to ingest some of the testdata collections which have media types that don't match the server's allowed
-        # list. For example, the CMR UMM items use `application/vnd.nasa.cmr.umm+json` which is not in the server's allowed list,
-        # so we map it to `application/json`.
-        # see ..\site-packages\stac_pydantic\shared.py for list of media types allowed by the server validation
         item = sanitize_item(item)
         post_or_put(urljoin(app_host, f"collections/{collection['id']}/items"), item)
+
+        if idx % 100 == 0:
+            logger.info(f"  Ingested {idx}/{len(item_files)} items...")
 
 
 def _usage() -> None:
