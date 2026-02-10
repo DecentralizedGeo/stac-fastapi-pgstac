@@ -133,3 +133,4 @@ venv
 # Project Specific
 state/
 _sandbox/
+appdata/
