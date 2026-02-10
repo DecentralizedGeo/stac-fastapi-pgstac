@@ -43,6 +43,8 @@ services:
       - PGDATABASE=${DB_NAME}
     ports:
       - 5439:${DB_PORT}
+    volumes:
+      - ${ROOT_DIR}/appdata/pgdata:/var/lib/postgresql/data
     command: postgres -N 500
 
   # Watch and auto-ingest collections when they change (Smart hash-based detection)
@@ -54,7 +56,7 @@ services:
     volumes:
       - ${ROOT_DIR}/scripts:/app/scripts
       - ${METADATA_WAREHOUSE}:/data-warehouse
-      - ${ROOT_DIR}/state:/app/state
+      - ${ROOT_DIR}/appdata/state:/app/state
     command: >
       /bin/sh -c "
         scripts/wait-for-it.sh -t 60 app:${PGSTAC_PORT} &&
