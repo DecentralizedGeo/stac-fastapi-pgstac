@@ -60,17 +60,13 @@ class CollectionWatcher:
         return file_path.stat().st_mtime
 
     def _get_directory_mtime(self, dir_path: Path) -> float:
-        """Get the latest modification time in a directory (recursively)."""
-        max_mtime = 0
+        """Get the modification time of the directory itself."""
         if dir_path.exists() and dir_path.is_dir():
             try:
-                for file_path in dir_path.rglob('*'):
-                    if file_path.is_file():
-                        mtime = file_path.stat().st_mtime
-                        max_mtime = max(max_mtime, mtime)
+                return dir_path.stat().st_mtime
             except Exception as e:
-                print(f"    Warning: Could not traverse directory {dir_path}: {e}")
-        return max_mtime
+                print(f"    Warning: Could not check directory {dir_path}: {e}")
+        return 0
 
     def _find_collections(self) -> Dict[str, Path]:
         """Find all collection.json files in data warehouse."""
