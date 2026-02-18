@@ -1,6 +1,7 @@
 services:
   app:
-    image: ghcr.io/stac-utils/stac-fastapi-pgstac:4.0.0
+    image: ghcr.io/stac-utils/stac-fastapi-pgstac
+    build: .
     container_name: stac-fastapi-pgstac
     environment:
       - APP_HOST=0.0.0.0
@@ -25,7 +26,11 @@ services:
       - ${PGSTAC_PORT}:${PGSTAC_PORT}
     depends_on:
       - database
-    command: bash -c "chmod +x /app/scripts/wait-for-it.sh && /app/scripts/wait-for-it.sh database:${DB_PORT} && python -m stac_fastapi.pgstac.app"
+    command: >
+      bash -c "
+        /app/scripts/wait-for-it.sh database:${DB_PORT} &&
+        python -m stac_fastapi.pgstac.app
+        "
     develop:
       watch:
         - action: rebuild
