@@ -55,7 +55,7 @@ services:
   # Watch and auto-ingest collections when they change (Smart hash-based detection)
   watcher:
     container_name: collection-watcher
-    image: ghcr.io/stac-utils/stac-fastapi-pgstac:4.0.0
+    image: ghcr.io/stac-utils/stac-fastapi-pgstac:6.2.1
     environment:
       - ENVIRONMENT=local
       - PGHOST=database
