@@ -33,6 +33,7 @@ from stac_fastapi.extensions.core import (
     TransactionExtension,
 )
 from stac_fastapi.extensions.core.fields import FieldsConformanceClasses
+from stac_fastapi.extensions.core.filter.filter import FilterConformanceClasses
 from stac_fastapi.extensions.core.free_text import FreeTextConformanceClasses
 from stac_fastapi.extensions.core.query import QueryConformanceClasses
 from stac_fastapi.extensions.core.sort import SortConformanceClasses
@@ -56,7 +57,15 @@ search_extensions_map: dict[str, ApiExtension] = {
     "query": QueryExtension(),
     "sort": SortExtension(),
     "fields": FieldsExtension(),
-    "filter": SearchFilterExtension(client=FiltersClient()),
+    "filter": SearchFilterExtension(client=FiltersClient(),
+                                            conformance_classes=[
+                                                FilterConformanceClasses.FILTER,
+                                                FilterConformanceClasses.SEARCH,
+                                                FilterConformanceClasses.BASIC_CQL2,
+                                                FilterConformanceClasses.CQL2_JSON,
+                                                FilterConformanceClasses.CQL2_TEXT,
+                                                FilterConformanceClasses.ARRAY_FUNCTIONS
+                                                ]),
     "pagination": TokenPaginationExtension(),
 }
 
@@ -65,7 +74,15 @@ cs_extensions_map: dict[str, ApiExtension] = {
     "query": QueryExtension(conformance_classes=[QueryConformanceClasses.COLLECTIONS]),
     "sort": SortExtension(conformance_classes=[SortConformanceClasses.COLLECTIONS]),
     "fields": FieldsExtension(conformance_classes=[FieldsConformanceClasses.COLLECTIONS]),
-    "filter": CollectionSearchFilterExtension(client=FiltersClient()),
+    "filter": CollectionSearchFilterExtension(client=FiltersClient(),
+                                            conformance_classes=[
+                                                FilterConformanceClasses.FILTER,
+                                                FilterConformanceClasses.COLLECTIONS,
+                                                FilterConformanceClasses.BASIC_CQL2,
+                                                FilterConformanceClasses.CQL2_JSON,
+                                                FilterConformanceClasses.CQL2_TEXT,
+                                                FilterConformanceClasses.ARRAY_FUNCTIONS
+                                                ]),
     "free_text": FreeTextExtension(
         conformance_classes=[FreeTextConformanceClasses.COLLECTIONS],
     ),
@@ -81,7 +98,15 @@ itm_col_extensions_map: dict[str, ApiExtension] = {
         conformance_classes=[SortConformanceClasses.ITEMS],
     ),
     "fields": FieldsExtension(conformance_classes=[FieldsConformanceClasses.ITEMS]),
-    "filter": ItemCollectionFilterExtension(client=FiltersClient()),
+    "filter": ItemCollectionFilterExtension(client=FiltersClient(),
+                                            conformance_classes=[
+                                                FilterConformanceClasses.FILTER,
+                                                FilterConformanceClasses.ITEMS,
+                                                FilterConformanceClasses.BASIC_CQL2,
+                                                FilterConformanceClasses.CQL2_JSON,
+                                                FilterConformanceClasses.CQL2_TEXT,
+                                                FilterConformanceClasses.ARRAY_FUNCTIONS
+                                                ]),
     "pagination": TokenPaginationExtension(),
 }
 
